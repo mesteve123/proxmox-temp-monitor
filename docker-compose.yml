@@ -1,6 +1,6 @@
 services:
   tempmon:
-    image: ghcr.io/YOUR_GITHUB_USER/proxmox-temp-monitor:latest
+    image: ghcr.io/mesteve123/proxmox-temp-monitor:latest
     container_name: proxmox-temp-monitor
     restart: unless-stopped
     ports:
