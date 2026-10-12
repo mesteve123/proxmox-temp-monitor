@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Proxmox Temp Monitor</title>
+<style>
+:root{--bg:#0f1419;--panel:#171d25;--panel2:#1e2631;--line:#2a3441;--txt:#e6edf3;--mut:#8b98a8;
+--ok:#3fb950;--warn:#f0a020;--crit:#f85149;--acc:#4cc9f0}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 20px;border-bottom:1px solid var(--line);background:var(--panel)}
+h1{font-size:18px;margin:0}
+button,select,input{font:inherit;color:inherit}
+button{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 14px;cursor:pointer}
+button:hover{border-color:var(--acc)}
+button.primary{background:var(--acc);color:#04222b;border-color:var(--acc);font-weight:600}
+button.danger{border-color:var(--crit);color:var(--crit)}
+button:disabled{opacity:.5;cursor:not-allowed}
+button.icon{padding:4px 9px}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:16px;padding:20px}
+@media(max-width:480px){#grid{grid-template-columns:1fr;padding:12px}}
+#empty{text-align:center;color:var(--mut);padding:60px 20px;display:none}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;min-width:0}
+.card-head{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.name{font-size:16px}
+.sub{color:var(--mut);font-size:12px;margin-top:2px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--mut);margin-right:8px}
+.dot.ok{background:var(--ok)}.dot.bad{background:var(--crit)}
+.actions{display:flex;gap:6px}
+.badges{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 6px}
+.badge{background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--ok);border-radius:8px;padding:6px 12px;display:flex;flex-direction:column;min-width:78px}
+.badge span{font-size:11px;color:var(--mut)}
+.badge b{font-size:20px}
+.badge.warn{border-left-color:var(--warn)}.badge.crit{border-left-color:var(--crit)}
+.err{color:var(--crit);font-size:12px;margin:4px 0}
+details{margin:8px 0}
+summary{cursor:pointer;color:var(--mut);font-size:12px}
+.sensors h4{margin:10px 0 4px;font-size:12px;color:var(--acc)}
+.sensors table{width:100%;border-collapse:collapse;font-size:12px}
+.sensors td{padding:2px 4px;border-bottom:1px solid var(--line)}
+.sensors td:nth-child(2){text-align:right;font-weight:600}
+.sensors td:nth-child(3){text-align:right;color:var(--mut)}
+.lvl-warn{color:var(--warn)}.lvl-crit{color:var(--crit)}
+.chart-head{display:flex;justify-content:flex-end;margin-top:6px}
+select,input{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+.chart{position:relative;margin-top:6px;min-height:200px}
+.chart svg{display:block;width:100%;height:200px}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--mut);margin-top:4px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}
+.tip{position:absolute;pointer-events:none;background:#000d;border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:12px;white-space:nowrap;display:none;z-index:2}
+.nodata{color:var(--mut);text-align:center;padding:70px 10px;font-size:13px}
+dialog{background:var(--panel);color:var(--txt);border:1px solid var(--line);border-radius:12px;padding:20px;width:min(440px,92vw)}
+dialog::backdrop{background:#000a}
+dialog h2{margin:0 0 14px;font-size:17px}
+label{display:block;margin-bottom:10px;font-size:12px;color:var(--mut)}
+label input,label select{display:block;width:100%;margin-top:3px;color:var(--txt)}
+.row{display:flex;gap:10px}.row>*{flex:1}
+.row .small{flex:0 0 90px}
+.btns{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+#status{margin-top:10px;padding:10px;border-radius:8px;font-size:13px;display:none;white-space:pre-wrap}
+#status.info{display:block;background:#4cc9f022;border:1px solid var(--acc)}
+#status.err{display:block;background:#f8514922;border:1px solid var(--crit)}
+#status.ok{display:block;background:#3fb95022;border:1px solid var(--ok)}
+#status .btns{margin-top:10px}
+.hint{font-size:12px;color:var(--mut);margin:-4px 0 10px}
+</style>
+</head>
+<body>
+<header>
+  <h1>🌡️ Proxmox Temp Monitor</h1>
+  <div><button id="btnAdd" class="primary">+ Add host</button> <button id="btnSettings">⚙ Settings</button></div>
+</header>
+<main id="grid"></main>
+<div id="empty">No hosts yet. Click <b>+ Add host</b> to get started.</div>
+
+<dialog id="dlgAdd">
+  <form id="formAdd" method="dialog">
+    <h2>Add Proxmox host</h2>
+    <label>Friendly name<input name="name" required placeholder="pve1"></label>
+    <div class="row">
+      <label>IP / hostname<input name="ip" required placeholder="192.168.1.10"></label>
+      <label class="small">SSH port<input name="port" type="number" value="22" min="1" max="65535"></label>
+    </div>
+    <label>Username<input name="username" required value="root" autocomplete="off"></label>
+    <label>Password<input name="password" type="password" required autocomplete="new-password"></label>
+    <div id="status"></div>
+    <div class="btns">
+      <button type="button" id="addCancel">Cancel</button>
+      <button type="submit" id="addSubmit" class="primary">Test connection &amp; save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlgSettings">
+  <form id="formSettings" method="dialog">
+    <h2>Settings</h2>
+    <label>Query each host every
+      <div class="row"><input id="pollV" type="number" min="1" required><select id="pollU"></select></div></label>
+    <p class="hint">Every query is also saved to the temperature history. Minimum: 5 seconds.</p>
+    <label>Keep history for (days)<input id="retV" type="number" min="1" max="3650" required></label>
+    <div id="setStatus" class="err"></div>
+    <div class="btns"><button type="button" id="setCancel">Cancel</button><button type="submit" class="primary">Save</button></div>
+  </form>
+</dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const PALETTE = ['#4cc9f0','#f72585','#b5e48c','#ffb703','#9d4edd','#06d6a0','#ef476f','#8ecae6'];
+const RANGES = [[1,'1 hour'],[6,'6 hours'],[24,'24 hours'],[168,'7 days'],[720,'30 days']];
+const cards = new Map();   // id -> {el, range}
+let settings = {poll_interval:30, retention_days:30};
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, {headers:{'Content-Type':'application/json'}, ...opts});
+  let j = {}; try { j = await r.json(); } catch {}
+  if (!r.ok) { const e = new Error(j.message || j.error || r.statusText); e.data = j; e.status = r.status; throw e; }
+  return j;
+}
+
+function level(v, high, crit) {
+  if (crit != null && v >= crit - 2) return 'crit';
+  if (high != null && v >= high - 5) return 'warn';
+  if (high == null && crit == null) { if (v >= 85) return 'crit'; if (v >= 70) return 'warn'; }
+  return 'ok';
+}
+const worst = ls => ls.includes('crit') ? 'crit' : ls.includes('warn') ? 'warn' : 'ok';
+const fmtTime = ts => new Date(ts * 1000).toLocaleTimeString();
+
+/* ---------------------------------------------------------------- cards */
+function cardHTML() {
+  return `<div class="card-head"><div><span class="dot"></span><strong class="name"></strong><div class="sub"></div></div>
+    <div class="actions"><button class="icon refresh" title="Query now">↻</button><button class="icon del danger" title="Delete host">🗑</button></div></div>
+    <div class="badges"></div><div class="err"></div>
+    <details><summary>All sensors</summary><div class="sensors"></div></details>
+    <div class="chart-head"><select class="range">${RANGES.map(([h,l]) => `<option value="${h}"${h===24?' selected':''}>${l}</option>`).join('')}</select></div>
+    <div class="chart"></div>`;
+}
+
+function ensureCard(h) {
+  let c = cards.get(h.id);
+  if (c) return c;
+  const el = document.createElement('div');
+  el.className = 'card'; el.dataset.id = h.id; el.innerHTML = cardHTML();
+  c = {el, range: 24};
+  el.querySelector('.range').onchange = e => { c.range = +e.target.value; loadHistory(h.id); };
+  el.querySelector('.refresh').onclick = async e => {
+    e.target.disabled = true;
+    try { await api(`/api/hosts/${h.id}/poll`, {method:'POST'}); await refresh(); } catch(err) { alert(err.message); }
+    e.target.disabled = false;
+  };
+  el.querySelector('.del').onclick = async () => {
+    if (!confirm(`Delete host "${c.name}" and all of its history?`)) return;
+    try { await api(`/api/hosts/${h.id}`, {method:'DELETE'}); await refresh(); } catch(err) { alert(err.message); }
+  };
+  cards.set(h.id, c); $('#grid').appendChild(el);
+  loadHistory(h.id);
+  return c;
+}
+
+function updateCard(h) {
+  const c = ensureCard(h), el = c.el; c.name = h.name;
+  const l = h.latest;
+  el.querySelector('.name').textContent = h.name;
+  el.querySelector('.sub').textContent = `${h.username}@${h.ip}:${h.port}` + (l ? ` · ${fmtTime(l.ts)}` : ' · waiting for first reading…');
+  el.querySelector('.dot').className = 'dot ' + (l ? (l.ok ? 'ok' : 'bad') : '');
+  el.querySelector('.err').textContent = l && !l.ok ? '⚠ ' + l.error : '';
+  const chips = (l && l.chips) || [];
+  el.querySelector('.badges').innerHTML = chips.map(ch => {
+    const m = ch.sensors.find(s => s.value === ch.main) || {};
+    return `<div class="badge ${level(ch.main, m.high, m.crit)}" title="${esc(ch.chip)}"><span>${esc(ch.label)}</span><b>${ch.main.toFixed(0)}°C</b></div>`;
+  }).join('');
+  el.querySelector('.sensors').innerHTML = chips.map(ch => `<h4>${esc(ch.label)} <small>(${esc(ch.chip)})</small></h4><table>` +
+    ch.sensors.map(s => `<tr><td>${esc(s.label)}</td><td class="lvl-${level(s.value, s.high, s.crit)}">${s.value.toFixed(1)}°C</td>
+      <td>${s.high != null ? 'high ' + s.high : ''}${s.crit != null ? ' · crit ' + s.crit : ''}</td></tr>`).join('') + '</table>').join('');
+}
+
+async function refresh() {
+  let hosts;
+  try { hosts = await api('/api/hosts'); } catch { return; }
+  const ids = new Set(hosts.map(h => h.id));
+  for (const [id, c] of cards) if (!ids.has(id)) { c.el.remove(); cards.delete(id); }
+  hosts.forEach(updateCard);
+  $('#empty').style.display = hosts.length ? 'none' : 'block';
+}
+
+/* ---------------------------------------------------------------- chart */
+async function loadHistory(id) {
+  const c = cards.get(id); if (!c) return;
+  try {
+    const d = await api(`/api/hosts/${id}/history?hours=${c.range}`);
+    drawChart(c.el.querySelector('.chart'), d, c.range);
+  } catch {}
+}
+
+function drawChart(box, d, hours) {
+  const pts = d.points, keys = Object.keys(d.chips);
+  if (pts.length < 2 || !keys.length) {
+    box.innerHTML = `<div class="nodata">Not enough data yet for this range.<br>A data point is saved every ${fmtDur(settings.poll_interval)}.</div>`;
+    return;
+  }
+  const W = Math.max(box.clientWidth, 300), H = 200, L = 40, R = 10, T = 10, B = 24;
+  let lo = Infinity, hi = -Infinity;
+  pts.forEach(p => keys.forEach(k => { const v = p.v[k]; if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }));
+  lo = Math.floor(lo / 5) * 5 - 5; hi = Math.ceil(hi / 5) * 5 + 5;
+  const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+  const x = t => L + (t - t0) / Math.max(1, t1 - t0) * (W - L - R);
+  const y = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+  let g = '';
+  for (let i = 0; i <= 4; i++) {
+    const v = lo + (hi - lo) * i / 4, yy = y(v);
+    g += `<line x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}" stroke="#2a3441"/><text x="${L-6}" y="${yy+4}" text-anchor="end" fill="#8b98a8" font-size="11">${v.toFixed(0)}°</text>`;
+  }
+  for (let i = 0; i <= 3; i++) {
+    const t = t0 + (t1 - t0) * i / 3, d2 = new Date(t * 1000);
+    const lab = hours <= 24 ? d2.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : d2.toLocaleDateString([], {day:'2-digit', month:'2-digit'}) + ' ' + d2.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    g += `<text x="${x(t)}" y="${H-6}" text-anchor="${i===0?'start':i===3?'end':'middle'}" fill="#8b98a8" font-size="11">${lab}</text>`;
+  }
+  const lines = keys.map((k, i) => {
+    const path = pts.filter(p => p.v[k] != null).map(p => `${x(p.t).toFixed(1)},${y(p.v[k]).toFixed(1)}`).join(' ');
+    return `<polyline points="${path}" fill="none" stroke="${PALETTE[i % PALETTE.length]}" stroke-width="2" stroke-linejoin="round"/>`;
+  }).join('');
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${g}${lines}<line class="cur" y1="${T}" y2="${H-B}" stroke="#8b98a8" stroke-dasharray="3" style="display:none"/></svg>
+    <div class="tip"></div><div class="legend">${keys.map((k, i) => `<span><i style="background:${PALETTE[i % PALETTE.length]}"></i>${esc(d.chips[k])}</span>`).join('')}</div>`;
+  const svg = box.querySelector('svg'), tip = box.querySelector('.tip'), cur = box.querySelector('.cur');
+  svg.onmousemove = e => {
+    const r = svg.getBoundingClientRect(), px = (e.clientX - r.left) / r.width * W;
+    let best = pts[0]; for (const p of pts) if (Math.abs(x(p.t) - px) < Math.abs(x(best.t) - px)) best = p;
+    cur.setAttribute('x1', x(best.t)); cur.setAttribute('x2', x(best.t)); cur.style.display = '';
+    tip.innerHTML = `<b>${new Date(best.t * 1000).toLocaleString()}</b><br>` + keys.map((k, i) => best.v[k] != null ? `<span style="color:${PALETTE[i % PALETTE.length]}">●</span> ${esc(d.chips[k])}: ${best.v[k].toFixed(1)}°C` : '').join('<br>');
+    tip.style.display = 'block';
+    const bx = svg.getBoundingClientRect().left - box.getBoundingClientRect().left;
+    const left = bx + x(best.t) / W * r.width;
+    tip.style.left = Math.min(left + 12, box.clientWidth - tip.offsetWidth - 4) + 'px'; tip.style.top = '8px';
+  };
+  svg.onmouseleave = () => { tip.style.display = 'none'; cur.style.display = 'none'; };
+}
+
+function fmtDur(s) {
+  if (s % 3600 === 0) return s / 3600 + ' h';
+  if (s % 60 === 0) return s / 60 + ' min';
+  return s + ' s';
+}
+
+/* ---------------------------------------------------------------- add host */
+const dlgAdd = $('#dlgAdd'), formAdd = $('#formAdd'), status = $('#status');
+function setStatus(html, cls) { status.className = cls || ''; status.innerHTML = html; }
+function formBody() { return Object.fromEntries(new FormData(formAdd).entries()); }
+function busy(b) { $('#addSubmit').disabled = b; $('#addCancel').disabled = b; }
+
+$('#btnAdd').onclick = () => { formAdd.reset(); setStatus('', ''); busy(false); dlgAdd.showModal(); };
+$('#addCancel').onclick = () => dlgAdd.close();
+
+async function saveHost(body) {
+  setStatus('Saving host…', 'info');
+  await api('/api/hosts', {method:'POST', body: JSON.stringify(body)});
+  dlgAdd.close(); await refresh();
+}
+
+formAdd.onsubmit = async ev => {
+  ev.preventDefault();
+  const body = formBody(); busy(true);
+  setStatus('Testing SSH connection…', 'info');
+  try {
+    const r = await api('/api/hosts/test', {method:'POST', body: JSON.stringify(body)});
+    if (r.sensors_installed) { await saveHost(body); busy(false); return; }
+    setStatus(`✔ Connection successful, but <b>lm-sensors is not installed</b> on that host.<br>Do you want to install it now (apt-get install lm-sensors)?
+      <div class="btns"><button type="button" id="noInstall">No</button><button type="button" id="doInstall" class="primary">Install lm-sensors</button></div>`, 'info');
+    $('#noInstall').onclick = () => { setStatus('Host not saved: lm-sensors is required to read temperatures.', 'err'); busy(false); };
+    $('#doInstall').onclick = async () => {
+      setStatus('Installing lm-sensors… (this may take a minute)', 'info');
+      try {
+        await api('/api/hosts/install-sensors', {method:'POST', body: JSON.stringify(body)});
+        await saveHost(body);
+      } catch (e) { setStatus('✖ ' + esc(e.message), 'err'); }
+      busy(false);
+    };
+  } catch (e) { setStatus('✖ ' + esc(e.message), 'err'); busy(false); }
+};
+
+/* ---------------------------------------------------------------- settings */
+const UNITS = [[1,'seconds'],[60,'minutes'],[3600,'hours']];
+UNITS.forEach(([v, l]) => $('#pollU').add(new Option(l, v)));
+function setDur(vId, uId, secs) {
+  const u = [3600, 60, 1].find(x => secs % x === 0);
+  $(vId).value = secs / u; $(uId).value = u;
+}
+const getDur = (vId, uId) => Math.round(+$(vId).value * +$(uId).value);
+
+$('#btnSettings').onclick = () => {
+  setDur('#pollV', '#pollU', settings.poll_interval);
+  $('#retV').value = settings.retention_days; $('#setStatus').textContent = '';
+  $('#dlgSettings').showModal();
+};
+$('#setCancel').onclick = () => $('#dlgSettings').close();
+$('#formSettings').onsubmit = async ev => {
+  ev.preventDefault();
+  try {
+    settings = await api('/api/settings', {method:'PUT', body: JSON.stringify({
+      poll_interval: getDur('#pollV', '#pollU'), retention_days: +$('#retV').value})});
+    $('#dlgSettings').close();
+  } catch (e) { $('#setStatus').textContent = e.message; }
+};
+
+/* ---------------------------------------------------------------- boot */
+(async () => {
+  try { settings = await api('/api/settings'); } catch {}
+  await refresh();
+  setInterval(refresh, 5000);
+  setInterval(() => cards.forEach((_, id) => loadHistory(id)), 30000);
+  window.addEventListener('resize', () => cards.forEach((_, id) => loadHistory(id)));
+})();
+</script>
+</body>
+</html>

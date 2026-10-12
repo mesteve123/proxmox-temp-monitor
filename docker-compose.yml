@@ -1,0 +1,14 @@
+services:
+  tempmon:
+    build: .
+    container_name: proxmox-temp-monitor
+    restart: unless-stopped
+    ports:
+      - "5080:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      TZ: Europe/Madrid
+      # Optional: protect the UI with a username/password (HTTP Basic)
+      # AUTH_USER: admin
+      # AUTH_PASS: change-me
